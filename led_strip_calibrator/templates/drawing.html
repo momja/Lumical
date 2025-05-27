@@ -6,6 +6,25 @@
     <title>LED Strip Interactive Drawing</title>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <style>
+
+        @font-face {
+            font-family: 'GamutSans';
+            src: url({{ url_for('static', filename='fonts/ZxGamut-Thin.woff2') }}) format('woff2');
+            font-weight: lighter;
+        }
+
+        @font-face {
+            font-family: 'GamutSans';
+            src: url({{ url_for('static', filename='fonts/ZxGamut-Medium.woff2') }}) format('woff2');
+            font-weight: lighter;
+        }
+
+        @font-face {
+            font-family: 'GamutSans';
+            src: url({{ url_for('static', filename='fonts/ZxGamut-Black.woff2') }}) format('woff2');
+            font-weight: bold;
+        }
+
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -20,8 +39,11 @@
         }
 
         .header {
+            font-family: 'GamutSans', sans-serif;
             text-align: center;
             margin-bottom: 20px;
+            font-weight: bold;
+            font-size: 1.5em;
         }
 
         .controls {
@@ -32,6 +54,13 @@
             flex-wrap: wrap;
         }
 
+        /* Inserting this collapsed row between two flex items will make
+         * the flex item that comes after it break to a new row */
+        .break {
+          flex-basis: 100%;
+          height: 0;
+        }
+
         .control-group {
             display: flex;
             align-items: center;
@@ -39,7 +68,7 @@
         }
 
         .control-group label {
-            font-size: 14px;
+            font-size: 1em;
         }
 
         button {
@@ -88,7 +117,7 @@
             background-color: #2a2a2a;
             color: white;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 1em;
         }
 
         select:focus {
@@ -155,7 +184,8 @@
             align-items: center;
             justify-content: center;
             color: white;
-            font-size: 12px;
+            font-size: 0.8em;
+            padding:0px;
         }
 
         .led-delete:hover {
@@ -193,7 +223,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>LED Strip Interactive Drawing</h1>
+            <h1>LumiCal</h1>
             <p>Draw on the canvas to control your LED strip colors</p>
             <p><small><strong>Left-click:</strong> Draw • <strong>Right-click:</strong> Add new LED</small></p>
         </div>
@@ -211,15 +241,9 @@
             </div>
 
             <div class="control-group">
-                <label for="knnK">K (neighbors):</label>
-                <input type="range" id="knnK" min="1" max="10" value="3">
-                <span id="knnKValue">3</span>
-            </div>
-
-            <div class="control-group">
-                <label for="maxRadius">Max Radius:</label>
-                <input type="range" id="maxRadius" min="0.01" max="0.5" step="0.01" value="0.25">
-                <span id="maxRadiusValue">1.0</span>
+                <label for="blurRadius">Blur Radius:</label>
+                <input type="range" id="blurRadius" min="0" max="50" value="10">
+                <span id="blurRadiusValue">10</span>px
             </div>
 
             <div class="control-group">
@@ -241,16 +265,18 @@
             </div>
 
             <div class="control-group">
-                <label for="autoUpdate">Auto-update:</label>
-                <input type="checkbox" id="autoUpdate">
-            </div>
-
-            <div class="control-group">
                 <input type="file" id="imageFileInput" accept="image/*" style="display: none;">
                 <button id="importImage">Import Image</button>
             </div>
 
             <button id="clearCanvas" class="clear">Clear Canvas</button>
+
+            <div class="break"></div> <!-- break -->
+
+            <div class="control-group">
+                <label for="autoUpdate">Auto-update LEDs:</label>
+                <input type="checkbox" id="autoUpdate">
+            </div>
             <button id="updateLEDs">Update LEDs</button>
         </div>
 
@@ -268,8 +294,9 @@
         <div class="led-display">
             <h3>LED Colors</h3>
             <div style="margin-bottom: 15px;">
-                <input type="file" id="csvFileInput" accept=".csv,text/csv" style="display: none;">
-                <button id="importCSV" style="margin-right: 10px;">Import LED Coordinates</button>
+                <input type="file" id="jsonFileInput" accept=".json,text/json" style="display: none;">
+                <button id="importJSON" style="margin-right: 10px;">Import LED Coordinates</button>
+                <button id="exportCSV" style="margin-right: 10px;">Export LED Pattern as CSV</button>
                 <button id="sampleColors" style="margin-right: 10px;">Sample Colors from Image</button>
                 <button id="clearAll" class="clear">Clear All LEDs</button>
             </div>
@@ -282,7 +309,6 @@
             <h3>Status</h3>
             <div id="statusText">Ready to draw</div>
             <div id="ledPositions">Loading LED positions...</div>
-            <div id="mappingParams">K-NN Parameters: K=3, Max Radius=1.0</div>
         </div>
     </div>
 
@@ -295,8 +321,8 @@
                 this.ledCtx = this.ledCanvas.getContext('2d');
                 this.isDrawing = false;
                 this.drawingData = [];
-                this.ledPositions = {};
-                this.currentLedColors = {};
+                this.ledPositions = new Map();
+                this.currentLedColors = new Map();
                 this.autoUpdateTimeout = null;
                 this.currentPath = []; // Track current stroke path
                 this.currentStrokeColor = null;
@@ -318,24 +344,22 @@
                 this.initializeControls();
                 this.initializeCanvas();
                 this.loadLEDPositions();
-                this.updateMappingParams();
             }
 
             initializeControls() {
                 const colorPicker = document.getElementById('colorPicker');
                 const brushSize = document.getElementById('brushSize');
                 const brushSizeValue = document.getElementById('brushSizeValue');
-                const knnK = document.getElementById('knnK');
-                const knnKValue = document.getElementById('knnKValue');
-                const maxRadius = document.getElementById('maxRadius');
-                const maxRadiusValue = document.getElementById('maxRadiusValue');
+                const blurRadius = document.getElementById('blurRadius');
+                const blurRadiusValue = document.getElementById('blurRadiusValue');
                 const blendMode = document.getElementById('blendMode');
                 const autoUpdate = document.getElementById('autoUpdate');
                 const clearButton = document.getElementById('clearCanvas');
                 const updateButton = document.getElementById('updateLEDs');
                 const clearAllButton = document.getElementById('clearAll');
-                const importCSVButton = document.getElementById('importCSV');
-                const csvFileInput = document.getElementById('csvFileInput');
+                const importJSONButton = document.getElementById('importJSON');
+                const exportCSVButton = document.getElementById('exportCSV');
+                const jsonFileInput = document.getElementById('jsonFileInput');
                 const sampleColorsButton = document.getElementById('sampleColors');
                 const importImageButton = document.getElementById('importImage');
                 const imageFileInput = document.getElementById('imageFileInput');
@@ -344,16 +368,8 @@
                     brushSizeValue.textContent = e.target.value;
                 });
 
-                knnK.addEventListener('input', (e) => {
-                    knnKValue.textContent = e.target.value;
-                    this.updateMappingParams();
-                    this.scheduleAutoUpdate();
-                });
-
-                maxRadius.addEventListener('input', (e) => {
-                    maxRadiusValue.textContent = parseFloat(e.target.value).toFixed(2);
-                    this.updateMappingParams();
-                    this.scheduleAutoUpdate();
+                blurRadius.addEventListener('input', (e) => {
+                    blurRadiusValue.textContent = e.target.value;
                 });
 
                 blendMode.addEventListener('change', (e) => {
@@ -382,16 +398,20 @@
                     this.clearAllLEDs();
                 });
 
-                importCSVButton.addEventListener('click', () => {
-                    csvFileInput.click();
+                importJSONButton.addEventListener('click', () => {
+                    jsonFileInput.click();
                 });
+
+                exportCSVButton.addEventListener('click', () => {
+                    this.exportCSV();
+                })
 
                 sampleColorsButton.addEventListener('click', () => {
                     this.sampleImageColors();
                 });
 
-                csvFileInput.addEventListener('change', (e) => {
-                    this.handleCSVImport(e);
+                jsonFileInput.addEventListener('change', (e) => {
+                    this.handleJSONImport(e);
                 });
 
                 importImageButton.addEventListener('click', () => {
@@ -524,7 +544,7 @@
                 const b = parseInt(this.currentStrokeColor.substr(5, 2), 16);
 
                 // Sample points along the entire path for LED data
-                this.samplePath(this.currentPath, r, g, b);
+                this.samplePath(this.currentPath, r, g, b, this.currentStrokeSize);
 
                 // Clear current path
                 this.currentPath = [];
@@ -532,11 +552,14 @@
                 this.currentStrokeSize = null;
                 this.currentBlendMode = null;
 
+                // Redraw the canvas to ensure LED indicators are on top
+                this.redrawCanvas();
+
                 // Trigger auto-update if enabled
                 this.scheduleAutoUpdate();
             }
 
-            samplePath(path, r, g, b) {
+            samplePath(path, r, g, b, strokeSize) {
                 if (path.length === 0) return;
 
                 if (path.length === 1) {
@@ -547,7 +570,8 @@
                         y: pos.y / this.canvas.height,
                         r: r,
                         g: g,
-                        b: b
+                        b: b,
+                        size: strokeSize
                     });
                 } else {
                     // Sample along the path
@@ -573,7 +597,8 @@
                                 y: y / this.canvas.height,
                                 r: r,
                                 g: g,
-                                b: b
+                                b: b,
+                                size: strokeSize
                             });
                         }
                     }
@@ -583,10 +608,23 @@
             clearCanvas() {
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
                 this.drawingData = [];
-                this.drawBackgroundImage();
-                this.drawLEDPositions();
+                this.redrawCanvas();
                 this.clearLEDColors();
                 this.updateStatus('Canvas cleared');
+            }
+
+            redrawCanvas() {
+                // Clear canvas
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw background image if present
+                this.drawBackgroundImage();
+
+                // Draw only the drawing content (stroke data)
+                this.drawOnlyDrawingContent(this.ctx);
+
+                // Draw LED indicators as overlay (always on top)
+                this.drawLEDPositions();
             }
 
             drawBackgroundImage() {
@@ -609,7 +647,7 @@
                     }
 
                     this.ledPositions = data.positions;
-                    this.drawLEDPositions();
+                    this.redrawCanvas();
                     this.initializeLEDDisplay();
                     this.initializeLEDCanvas();
                     this.updateStatus(`Loaded ${data.count} LED positions`);
@@ -660,44 +698,87 @@
                 }
             }
 
-            async updateLEDs() {
-                if (this.drawingData.length === 0) {
-                    this.updateStatus('No drawing data to process');
+            updateLEDs() {
+                if (Object.keys(this.ledPositions).length === 0) {
+                    this.updateStatus('No LED positions to process');
                     return;
                 }
 
-                // Get current parameter values
-                const k = parseInt(document.getElementById('knnK').value);
-                const maxRadius = parseFloat(document.getElementById('maxRadius').value);
-
-                this.updateStatus(`Updating LED colors (K=${k}, max_radius=${maxRadius})...`);
+                this.updateStatus('Updating LED colors with Gaussian blur sampling...');
 
                 try {
-                    const response = await fetch('/update_colors', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            drawing_data: this.drawingData,
-                            k: k,
-                            max_radius: maxRadius
-                        })
-                    });
+                    // Create a temporary canvas for blur sampling with ONLY drawing content
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = this.canvas.width;
+                    tempCanvas.height = this.canvas.height;
+                    const tempCtx = tempCanvas.getContext('2d');
 
-                    const data = await response.json();
-
-                    if (data.error) {
-                        this.updateStatus(`Error: ${data.error}`);
-                        return;
+                    // Draw background image if present
+                    if (this.backgroundImage) {
+                        tempCtx.drawImage(this.backgroundImage, 0, 0, this.canvas.width, this.canvas.height);
                     }
 
-                    this.displayLEDColors(data.led_colors);
-                    this.updateStatus(`Updated ${Object.keys(data.led_colors).length} LED colors`);
+                    // Draw ONLY the drawing data (not LED indicators)
+                    this.drawOnlyDrawingContent(tempCtx);
+
+                    // Apply Gaussian blur filter using user-controlled radius
+                    const blurRadius = parseInt(document.getElementById('blurRadius').value);
+                    tempCtx.filter = `blur(${blurRadius}px)`;
+                    tempCtx.drawImage(tempCanvas, 0, 0);
+                    tempCtx.filter = 'none';
+
+                    // Sample colors at each LED position
+                    const ledColors = new Map();
+                    let sampledCount = 0;
+
+                    for (const [ledIndex, position] of Object.entries(this.ledPositions)) {
+                        const x = Math.round(position[0] * this.canvas.width);
+                        const y = Math.round(position[1] * this.canvas.height);
+
+                        // Get pixel data at LED position from blurred canvas
+                        const imageData = tempCtx.getImageData(x, y, 1, 1);
+                        const pixel = imageData.data;
+
+                        const r = pixel[0];
+                        const g = pixel[1];
+                        const b = pixel[2];
+
+                        // Only include LEDs with non-black colors (indicating they have drawing content)
+                        if (r > 0 || g > 0 || b > 0) {
+                            ledColors[ledIndex] = { r, g, b };
+                            sampledCount++;
+                        }
+                    }
+
+                    this.displayLEDColors(ledColors);
+                    this.updateStatus(`Updated ${sampledCount} LED colors using ${blurRadius}px Gaussian blur`);
 
                 } catch (error) {
                     this.updateStatus(`Error updating LEDs: ${error.message}`);
                 }
+            }
+
+            drawOnlyDrawingContent(ctx) {
+                const blendMode = document.getElementById('blendMode').value;
+
+                ctx.globalCompositeOperation = blendMode;
+
+                // Draw each point in the drawing data using its stored size
+                for (const point of this.drawingData) {
+                    const x = point.x * this.canvas.width;
+                    const y = point.y * this.canvas.height;
+
+                    // Use the stored size from when the stroke was made
+                    const radius = point.size || 5; // Default to 5 if no size stored
+
+                    ctx.fillStyle = `rgb(${point.r}, ${point.g}, ${point.b})`;
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // Reset composite operation
+                ctx.globalCompositeOperation = 'source-over';
             }
 
             displayLEDColors(ledColors) {
@@ -722,7 +803,7 @@
 
             clearLEDColors() {
                 // Reset the current LED colors state
-                this.currentLedColors = {};
+                this.currentLedColors = new Map();
 
                 // Reset all LED colors to black/off
                 for (const ledIndex of Object.keys(this.ledPositions)) {
@@ -742,13 +823,6 @@
             updateStatus(message) {
                 document.getElementById('statusText').textContent = message;
                 console.log(message);
-            }
-
-            updateMappingParams() {
-                const k = document.getElementById('knnK').value;
-                const maxRadius = parseFloat(document.getElementById('maxRadius').value).toFixed(2);
-                document.getElementById('mappingParams').textContent =
-                    `K-NN Parameters: K=${k}, Max Radius=${maxRadius}`;
             }
 
             scheduleAutoUpdate() {
@@ -813,7 +887,7 @@
                         const rgbColor = `rgb(${color.r}, ${color.g}, ${color.b})`;
                         this.ledCtx.fillStyle = rgbColor;
                         this.ledCtx.beginPath();
-                        this.ledCtx.arc(x, y, 8, 0, 2 * Math.PI);
+                        this.ledCtx.arc(x, y, 10, 0, 2 * Math.PI);
                         this.ledCtx.fill();
 
                         // Create ultra-intense luminous glow effect
@@ -825,9 +899,9 @@
 
                         // First base glow layer
                         this.ledCtx.shadowColor = rgbColor;
-                        this.ledCtx.shadowBlur = 25; // Increased from 10
+                        this.ledCtx.shadowBlur = 25;
                         this.ledCtx.beginPath();
-                        this.ledCtx.arc(x, y, 12, 0, 2 * Math.PI); // Larger radius
+                        this.ledCtx.arc(x, y, 16, 0, 2 * Math.PI); // Larger radius
                         this.ledCtx.fillStyle = rgbColor;
                         this.ledCtx.fill();
 
@@ -877,7 +951,7 @@
                     this.ledPositions[nextIndex] = [normalizedX, normalizedY];
 
                     // Redraw both canvases
-                    this.drawLEDPositions();
+                    this.redrawCanvas();
                     this.initializeLEDCanvas();
 
                     // Add to LED display grid
@@ -903,7 +977,7 @@
                 ledItem.id = `led-item-${ledIndex}`;
                 ledItem.innerHTML = `
                     <button class="led-delete" onclick="app.deleteLED(${ledIndex})">
-                        <i class="ph ph-x"></i>
+                        <i class="ph ph-trash-simple"></i>
                     </button>
                     <div>LED ${ledIndex}</div>
                     <div class="led-color" id="led-color-${ledIndex}" style="background-color: #000;"></div>
@@ -912,34 +986,46 @@
                 ledGrid.appendChild(ledItem);
             }
 
-            async handleCSVImport(event) {
+            async handleJSONImport(event) {
                 const file = event.target.files[0];
                 if (!file) return;
 
                 // Validate file type
-                if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
-                    this.updateStatus('Error: Please select a valid CSV file');
+                if (file.type !== 'text/json' && !file.name.toLowerCase().endsWith('.json')) {
+                    this.updateStatus('Error: Please select a valid JSON file');
                     return;
                 }
 
                 try {
-                    const text = await file.text();
-                    const lines = text.split('\n').filter(line => line.trim());
+                  const text = await file.text();
+                  const jsonData = JSON.parse(text);
+
+                  this.updateStatus("Reading JSON file:" + jsonData)
+
+                  if (!Object.keys(jsonData).includes("coords")) {
+                      this.updateStatus('Error: JSON file must contain a "coords" array');
+                      return;
+                  }
+
+                  const lines = jsonData.coords.split('\n').filter(line => line.trim && line.trim());
+
+                  // Use calibration data dimensions for normalization since that matches the source dimensions
+                  const calibration_width = jsonData.width;
+                  const calibration_height = jsonData.height;
 
                     if (lines.length === 0) {
-                        this.updateStatus('Error: CSV file is empty');
+                        this.updateStatus('Error: CSV data is empty');
                         return;
                     }
 
                     // Parse CSV (expect: led_index,x,y)
                     const header = lines[0].toLowerCase();
                     if (!header.includes('led_index') || !header.includes('x') || !header.includes('y')) {
-                        this.updateStatus('Error: CSV must have columns: led_index, x, y');
+                        this.updateStatus('Error: JSON must have columns: led_index, x, y');
                         return;
                     }
 
                     let importedCount = 0;
-                    // Use canvas dimensions for normalization since that's our coordinate system
                     const canvasWidth = this.canvas.width;
                     const canvasHeight = this.canvas.height;
 
@@ -952,8 +1038,8 @@
 
                             if (!isNaN(ledIndex) && !isNaN(x) && !isNaN(y)) {
                                 // Normalize coordinates
-                                const normalizedX = x / canvasWidth;
-                                const normalizedY = y / canvasHeight;
+                                const normalizedX = x / calibration_width;
+                                const normalizedY = y / calibration_height;
 
                                 // Add LED using existing method
                                 this.ledPositions[ledIndex] = [normalizedX, normalizedY];
@@ -964,13 +1050,13 @@
                     }
 
                     // Update canvases and mapper
-                    this.drawLEDPositions();
+                    this.redrawCanvas();
                     this.initializeLEDCanvas();
 
-                    this.updateStatus(`Imported ${importedCount} LEDs from CSV`);
+                    this.updateStatus(`Imported ${importedCount} LEDs from JSON`);
 
                 } catch (error) {
-                    this.updateStatus(`Error reading CSV: ${error.message}`);
+                    this.updateStatus(`Error reading JSON: ${error.message}`);
                 }
 
                 // Reset file input
@@ -1002,9 +1088,7 @@
                     this.backgroundImage = img;
 
                     // Clear canvas and redraw with background
-                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                    this.drawBackgroundImage();
-                    this.drawLEDPositions();
+                    this.redrawCanvas();
 
                     // Sample colors from image at LED positions
                     this.sampleImageColors();
@@ -1022,6 +1106,30 @@
                 event.target.value = '';
             }
 
+            exportCSV() {
+               // Create CSV content with headers
+              let csvContent = "Index,Red,Green,Blue\n";
+
+              // Create export data from current LED colors
+              for (const [ledIndex, position] of Object.entries(this.ledPositions)) {
+                const color = this.currentLedColors[ledIndex] || { r: 0, g: 0, b: 0 };
+                csvContent += `${ledIndex},${color.r},${color.g},${color.b}\n`;
+              }
+
+              // Create a blob and download link
+              const blob = new Blob([csvContent], { type: 'text/csv' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'led_colors.csv';
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+
+              this.updateStatus('LED colors exported to CSV');
+            }
+
             sampleImageColors() {
                 if (!this.backgroundImage || Object.keys(this.ledPositions).length === 0) {
                     return;
@@ -1037,7 +1145,7 @@
                 tempCtx.drawImage(this.backgroundImage, 0, 0, tempCanvas.width, tempCanvas.height);
 
                 // Sample colors at each LED position
-                const ledColors = {};
+                const ledColors = new Map();
 
                 for (const [ledIndex, position] of Object.entries(this.ledPositions)) {
                     const x = Math.round(position[0] * this.canvas.width);
@@ -1090,7 +1198,7 @@
                 const b = pixel[2];
 
                 // Update LED display with sampled color
-                const ledColors = {};
+                const ledColors = new Map();
                 ledColors[ledIndex] = { r, g, b };
                 this.displayLEDColors(ledColors);
 
@@ -1108,7 +1216,7 @@
                 }
 
                 // Update canvases
-                this.drawLEDPositions();
+                this.redrawCanvas();
                 this.initializeLEDCanvas();
 
                 this.updateStatus(`Deleted LED ${ledIndex}`);
@@ -1122,15 +1230,15 @@
 
                 if (confirm('Are you sure you want to delete all LEDs? This cannot be undone.')) {
                     // Clear all data
-                    this.ledPositions = {};
-                    this.currentLedColors = {};
+                    this.ledPositions = new Map;
+                    this.currentLedColors = new Map();
 
                     // Clear displays
                     const ledGrid = document.getElementById('ledGrid');
                     ledGrid.innerHTML = '';
 
                     // Update canvases
-                    this.drawLEDPositions();
+                    this.redrawCanvas();
                     this.initializeLEDCanvas();
 
                     this.updateStatus('All LEDs cleared');
