@@ -20,20 +20,8 @@ See the [firmware README](firmware/README.md) for detailed instructions on insta
 
 Requirements:
 - Python 3.14+
-- OpenCV
-- NumPy
-- Pandas
 
-Install using `uv`:
-
-```bash
-# Create and activate a virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install the package
-uv pip install -e ".[dev]"
-```
+Run using `uv`:
 
 ## Usage
 
@@ -72,12 +60,17 @@ uv run -m led_strip_calibrator process path/to/images --output calibration.csv -
 - etc.
 
 The number in the filename must match the position of the LED on the strip.
+If multiple LED strips are used, post-processing might be required before streaming
+to your LED driver.
 
 ## Output
 
 The calibration process produces:
-- A CSV file with columns `led_index`, `x`, `y` for each LED
-- A visualization image showing all LED positions
+- A JSON file with attributes
+    - "coords": CSV string with rows as `led_index`, `x`, `y` for each LED
+    - "height": The height of the calibration images (they must all be the same dimensions)
+    - "width": The width of the calibration images.
+- (Optionally) A visualization image showing all LED positions
 
 When using the `--visualize` option:
 - An `overlays` directory is created with individual overlays
@@ -94,10 +87,10 @@ When using the `--visualize` option:
 pytest
 
 # Check code style
-ruff check .
+uv run ruff check .
 
 # Format code
-ruff format .
+uv run ruff format .
 
 # Check types
 mypy led_strip_calibrator

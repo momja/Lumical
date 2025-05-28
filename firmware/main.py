@@ -5,6 +5,7 @@ This firmware controls individually addressable LED strips (WS2811) for calibrat
 It turns on one LED at a time at full brightness and provides a button input to
 increment to the next LED.
 """
+
 import time
 
 import machine
@@ -43,11 +44,11 @@ def set_current_led():
 def button_pressed(pin):
     """
     Button press interrupt handler.
-    
+
     Increments to the next LED with debounce protection.
     """
     global current_led, last_button_time
-    
+
     current_time = time.ticks_ms()
     if time.ticks_diff(current_time, last_button_time) > DEBOUNCE_TIME_MS:
         current_led = (current_led + 1) % NUM_LEDS
@@ -60,12 +61,12 @@ def main():
     """Main program entry point."""
     # Set up button interrupt
     button.irq(trigger=machine.Pin.IRQ_FALLING, handler=button_pressed)
-    
+
     # Initialize by turning on the first LED
     set_current_led()
     print(f"LED calibration started. LED {current_led} activated.")
     print("Press button to advance to next LED.")
-    
+
     # Main loop - keep the program running
     while True:
         time.sleep(0.1)

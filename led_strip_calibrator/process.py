@@ -4,6 +4,7 @@ Main processing module for LED strip calibration.
 This module handles processing a sequence of images to extract LED positions
 and generate a calibration file.
 """
+
 import csv
 import io
 import json
@@ -36,7 +37,7 @@ def load_images(image_dir: str) -> Dict[int, np.ndarray]:
     for file_path in sorted(image_path.glob("led_*.jpg")):
         # Extract LED number from filename
         try:
-            led_num = int(file_path.stem.split('_')[1])
+            led_num = int(file_path.stem.split("_")[1])
             images[led_num] = cv2.imread(str(file_path))
             print(f"Loaded image for LED {led_num}")
         except (ValueError, IndexError) as e:
@@ -46,9 +47,7 @@ def load_images(image_dir: str) -> Dict[int, np.ndarray]:
 
 
 def process_images(
-    images: Dict[int, np.ndarray],
-    method: str = "weighted",
-    threshold: int = 200
+    images: Dict[int, np.ndarray], method: str = "weighted", threshold: int = 200
 ) -> List[Tuple[int, Optional[Tuple[int, int]]]]:
     """
     Process all images to find LED centroids.
@@ -85,7 +84,9 @@ def process_images(
 
 
 def save_calibration(
-    results: List[Tuple[int, Optional[Tuple[int, int]]]], dimensions: Tuple[int, int], output_file: str
+    results: List[Tuple[int, Optional[Tuple[int, int]]]],
+    dimensions: Tuple[int, int],
+    output_file: str,
 ) -> None:
     """
     Save calibration results to a JSON file with CSV data and image dimensions.
@@ -98,14 +99,14 @@ def save_calibration(
     # Create a string buffer for CSV data
     csv_buffer = io.StringIO()
     writer = csv.writer(csv_buffer)
-    writer.writerow(['led_index', 'x', 'y'])
+    writer.writerow(["led_index", "x", "y"])
 
     # Calculate image dimensions from the data
     for led_index, centroid in results:
         if centroid:
             writer.writerow([led_index, centroid[0], centroid[1]])
         else:
-            writer.writerow([led_index, '', ''])
+            writer.writerow([led_index, "", ""])
 
     # Get the CSV as a string
     csv_string = csv_buffer.getvalue()
@@ -114,11 +115,11 @@ def save_calibration(
     calibration_data = {
         "coords": csv_string,
         "height": dimensions[0],
-        "width": dimensions[1]
+        "width": dimensions[1],
     }
 
     # Write the JSON to the file
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         json.dump(calibration_data, f, indent=2)
 
 
@@ -126,7 +127,7 @@ def visualize_results(
     results: List[Tuple[int, Optional[Tuple[int, int]]]],
     image_shape: Tuple[int, int],
     output_file: str,
-    overlay_images: Optional[Dict[int, np.ndarray]] = None
+    overlay_images: Optional[Dict[int, np.ndarray]] = None,
 ) -> None:
     """
     Create a visualization of all LED positions.
@@ -192,18 +193,24 @@ def visualize_results(
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
                         (0, 255, 0),
-                        2
+                        2,
                     )
 
                     # Save the overlay
-                    overlay_path = os.path.join(overlay_dir, f"led_{led_index}_overlay.jpg")
+                    overlay_path = os.path.join(
+                        overlay_dir, f"led_{led_index}_overlay.jpg"
+                    )
                     cv2.imwrite(overlay_path, orig_img)
                     print(f"Overlay for LED {led_index} saved to {overlay_path}")
 
                 # Draw centroids on the composite
                 # Use color scale from blue to red based on LED index
                 color_scale = int(255 * (led_index / max(1, len(results))))
-                color = (color_scale, 255 - color_scale, 255)  # Cyan to magenta color gradient
+                color = (
+                    color_scale,
+                    255 - color_scale,
+                    255,
+                )  # Cyan to magenta color gradient
 
                 # Draw a circle at the LED position
                 cv2.circle(composite, (x, y), 5, color, -1)
@@ -216,7 +223,7 @@ def visualize_results(
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255, 255, 255),
-                    1
+                    1,
                 )
 
         # Save the composite visualization
@@ -245,7 +252,7 @@ def visualize_results(
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255, 255, 255),
-                    1
+                    1,
                 )
 
     # Save the visualization
@@ -258,7 +265,7 @@ def main(
     output_file: str = "led_calibration.json",
     method: str = "weighted",
     visualize: bool = False,
-    threshold: int = 200
+    threshold: int = 200,
 ) -> None:
     """
     Main function to run the LED strip calibration process.
@@ -301,7 +308,7 @@ def main(
         results,
         (first_image.shape[0], first_image.shape[1]),
         visualization_path,
-        overlay_images
+        overlay_images,
     )
 
     if visualize:
@@ -312,20 +319,16 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="LED Strip Calibration Tool")
+    parser.add_argument("image_dir", help="Directory containing LED calibration images")
     parser.add_argument(
-        "image_dir",
-        help="Directory containing LED calibration images"
+        "--output", "-o", default="led_calibration.json", help="Output JSON file path"
     )
     parser.add_argument(
-        "--output", "-o",
-        default="led_calibration.json",
-        help="Output JSON file path"
-    )
-    parser.add_argument(
-        "--method", "-m",
+        "--method",
+        "-m",
         choices=["threshold", "weighted"],
         default="weighted",
-        help="Centroid detection method"
+        help="Centroid detection method",
     )
 
     args = parser.parse_args()

@@ -4,6 +4,7 @@ Functions for detecting LED centroids in images.
 This module provides functionality to locate the center point of illuminated LEDs
 in calibration images using brightness detection.
 """
+
 from typing import Optional, Tuple
 
 import cv2
@@ -63,7 +64,9 @@ def find_brightest_point(
     return (centroid_x, centroid_y)
 
 
-def find_led_center_weighted(image: np.ndarray, min_brightness: int = 100) -> Optional[Tuple[int, int]]:
+def find_led_center_weighted(
+    image: np.ndarray, min_brightness: int = 100
+) -> Optional[Tuple[int, int]]:
     """
     Find LED center using brightness-weighted centroid calculation.
 
@@ -86,42 +89,42 @@ def find_led_center_weighted(image: np.ndarray, min_brightness: int = 100) -> Op
 
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    
+
     # Find maximum brightness
     max_val = np.max(blurred)
-    
+
     # If image is too dark, return None
     if max_val < 50:  # Minimum overall brightness
         return None
-    
+
     # Create a mask to focus only on bright pixels
     # Use adaptive threshold based on image's maximum brightness
     adaptive_threshold = max(min_brightness, max_val // 2)
     mask = blurred > adaptive_threshold
-    
+
     # If no pixels above threshold, return None
     if not np.any(mask):
         return None
-    
+
     # Apply mask to the blurred image
     masked = blurred.copy()
     masked[~mask] = 0
-    
+
     # Get total brightness of masked pixels
     total_brightness = np.sum(masked)
-    
+
     # Avoid division by zero
     if total_brightness == 0:
         return None
-    
+
     # Get image dimensions
     height, width = blurred.shape
-    
+
     # Create coordinate grids
     y_coords, x_coords = np.mgrid[0:height, 0:width]
-    
+
     # Calculate weighted centroid using only masked (bright) pixels
     weighted_x = np.sum(x_coords * masked) / total_brightness
     weighted_y = np.sum(y_coords * masked) / total_brightness
-    
+
     return (int(weighted_x), int(weighted_y))

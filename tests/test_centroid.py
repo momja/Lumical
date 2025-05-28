@@ -1,6 +1,7 @@
 """
 Tests for the centroid detection module.
 """
+
 from typing import Tuple
 
 import numpy as np
@@ -12,7 +13,7 @@ def create_test_image(
     size: Tuple[int, int] = (100, 100),
     center: Tuple[int, int] = (50, 50),
     radius: int = 5,
-    brightness: int = 255
+    brightness: int = 255,
 ) -> np.ndarray:
     """
     Create a test image with a bright spot at the specified center.

@@ -29,7 +29,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py314"
-select = ["E", "F", "B", "I"]
+lint.select = ["E", "F", "B", "I"]
 
 [tool.ruff.format]
 quote-style = "double"

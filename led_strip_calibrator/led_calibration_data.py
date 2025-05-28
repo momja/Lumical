@@ -1,5 +1,6 @@
-from typing import Dict, Tuple
 import csv
+from typing import Dict, Tuple
+
 
 class LEDCalibrationData:
     """Handle LED calibration data loading and normalization."""
@@ -15,14 +16,14 @@ class LEDCalibrationData:
 
     def load_calibration(self, calibration_file: str) -> None:
         """Load LED positions from calibration CSV file."""
-        with open(calibration_file, 'r') as f:
+        with open(calibration_file, "r") as f:
             reader = csv.DictReader(f)
             max_x, max_y = 0, 0
 
             for row in reader:
-                if row['x'] and row['y']:  # Skip empty rows
-                    led_index = int(row['led_index'])
-                    x, y = int(row['x']), int(row['y'])
+                if row["x"] and row["y"]:  # Skip empty rows
+                    led_index = int(row["led_index"])
+                    x, y = int(row["x"]), int(row["y"])
                     self.led_positions[led_index] = (x, y)
                     max_x = max(max_x, x)
                     max_y = max(max_y, y)
