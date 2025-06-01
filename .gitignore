@@ -50,3 +50,5 @@ sample_comparison.jpg
 # OS
 .DS_Store
 Thumbs.db
+
+.env

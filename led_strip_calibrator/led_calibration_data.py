@@ -1,4 +1,6 @@
 import csv
+import io
+import json
 from typing import Dict, Tuple
 
 
@@ -6,7 +8,7 @@ class LEDCalibrationData:
     """Handle LED calibration data loading and normalization."""
 
     def __init__(self, calibration_file: str | None = None):
-        """Initialize with calibration data from CSV file."""
+        """Initialize with calibration data from JSON file."""
         self.led_positions: Dict[int, Tuple[float, float]] = {}
         self.image_width: int = 0
         self.image_height: int = 0
@@ -15,25 +17,27 @@ class LEDCalibrationData:
         self.normalize_coordinates()
 
     def load_calibration(self, calibration_file: str) -> None:
-        """Load LED positions from calibration CSV file."""
+        """Load LED positions from calibration JSON file."""
         with open(calibration_file, "r") as f:
-            reader = csv.DictReader(f)
-            max_x, max_y = 0, 0
-
-            for row in reader:
-                if row["x"] and row["y"]:  # Skip empty rows
+            # Load the JSON data
+            data = json.load(f)
+            
+            # Get dimensions from JSON
+            self.image_height = data.get("height", 0)
+            self.image_width = data.get("width", 0)
+            
+            # Parse the embedded CSV data
+            csv_data = data.get("coords", "")
+            csv_reader = csv.DictReader(io.StringIO(csv_data))
+            
+            for row in csv_reader:
+                if row.get("x") and row.get("y"):  # Skip empty rows
                     led_index = int(row["led_index"])
                     x, y = int(row["x"]), int(row["y"])
                     self.led_positions[led_index] = (x, y)
-                    max_x = max(max_x, x)
-                    max_y = max(max_y, y)
-
-            # Estimate image dimensions from max coordinates
-            self.image_width = max_x + 100  # Add padding
-            self.image_height = max_y + 100
 
         print(f"Loaded {len(self.led_positions)} LED positions")
-        print(f"Estimated image dimensions: {self.image_width}x{self.image_height}")
+        print(f"Image dimensions: {self.image_width}x{self.image_height}")
 
     def normalize_coordinates(self) -> None:
         """Normalize LED coordinates to 0-1 range for web canvas."""
@@ -64,3 +68,34 @@ class LEDCalibrationData:
         self.led_positions[led_index] = (raw_x, raw_y)
 
         return (raw_x, raw_y)
+
+
+if __name__ == "__main__":
+    # This block allows the module to be run directly as a script for testing purposes.
+    # It provides a simple way to verify that the calibration data loading works correctly
+    # without needing to invoke the full application.
+    #
+    # Example usage:
+    #   python -m led_strip_calibrator.led_calibration_data
+    #   python -m led_strip_calibrator.led_calibration_data path/to/custom_calibration.json
+    
+    import sys
+    
+    # Use the provided file or default to led_calibration.json
+    calibration_file = sys.argv[1] if len(sys.argv) > 1 else "led_calibration.json"
+    
+    # Create the calibration data object
+    calibration = LEDCalibrationData(calibration_file)
+    
+    # Print the loaded data
+    print(f"\nLoaded {len(calibration.led_positions)} LED positions:")
+    for led_index in sorted(calibration.led_positions.keys()):
+        x, y = calibration.led_positions[led_index]
+        print(f"LED {led_index}: ({x:.1f}, {y:.1f})")
+    
+    print(f"\nImage dimensions: {calibration.image_width}x{calibration.image_height}")
+    
+    print("\nNormalized positions:")
+    for led_index in sorted(calibration.normalized_positions.keys())[:5]:  # Show first 5 for brevity
+        nx, ny = calibration.normalized_positions[led_index]
+        print(f"LED {led_index}: ({nx:.3f}, {ny:.3f})")
