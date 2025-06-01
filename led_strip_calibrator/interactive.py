@@ -5,23 +5,21 @@ This module provides a web-based canvas interface for drawing and mapping
 pixel colors to LED positions using calibration data.
 """
 
-from pathlib import Path
-from typing import Optional
-import threading
-import time
-import queue
 import atexit
 import base64
-
-from flask import Flask, jsonify, render_template, request, session
-from flask_socketio import SocketIO, emit
+import os
+import queue
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Optional
 
 import cv2
 import numpy as np
-from io import BytesIO
-import os
 from dotenv import load_dotenv
-import uuid
+from flask import Flask, jsonify, render_template, request, session
+from flask_socketio import SocketIO, emit
 
 from led_strip_calibrator.led_calibration_data import LEDCalibrationData
 from led_strip_calibrator.logger import logger
@@ -29,18 +27,20 @@ from led_strip_calibrator.logger import logger
 # Flask web application
 app = Flask(__name__)
 load_dotenv()
-app.secret_key = os.getenv('FLASK_SECRET_KEY')
-app.config["SESSION_PERMANENT"] = False     # Sessions expire when the browser is closed
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
+app.config["SESSION_PERMANENT"] = False  # Sessions expire when the browser is closed
 
 # Create SocketIO instance
-socketio = SocketIO(app, cors_allowed_origins='*')  # Allow all origins for testing
+socketio = SocketIO(app, cors_allowed_origins="*")  # Allow all origins for testing
 
 # Global variables for the application state
 calibration_data: Optional[LEDCalibrationData] = None
 
 # Thread-safe queue for handling multi-threaded server requests
 # This allows us to synchronize the user experience across all clients
-deltaMessageQueue = queue.Queue(maxsize=100)  # Limit queue size to prevent memory issues
+deltaMessageQueue = queue.Queue(
+    maxsize=100
+)  # Limit queue size to prevent memory issues
 
 # Maintain a server-side master canvas state
 master_canvas = None
@@ -49,6 +49,7 @@ master_canvas_lock = threading.Lock()
 # Thread control
 worker_thread = None
 shutdown_flag = None
+
 
 @app.route("/")
 def index():
@@ -60,32 +61,33 @@ def index():
 def custom_sign():
     """Serve the custom overlay interface, stripped of most controls"""
     # If client session is not already set up...
-    if 'client_id' not in session:
+    if "client_id" not in session:
         # randomly set a client id so we can track any future changes made by this client
         # and publish those changes to other clients
-        session['client_id'] = str(uuid.uuid4())
+        session["client_id"] = str(uuid.uuid4())
 
     return render_template("sign.html")
+
 
 @app.route("/get_full_canvas")
 def get_full_canvas():
     """Return the current full canvas state for clients that connect or refresh"""
     global master_canvas
-    
+
     with master_canvas_lock:
         if master_canvas is None:
-            return jsonify({"success": False, "message": "No canvas state available"}), 404
-        
+            return jsonify(
+                {"success": False, "message": "No canvas state available"}
+            ), 404
+
         # Convert the master canvas to a data URL
-        _, buffer = cv2.imencode('.png', master_canvas)
-        img_str = base64.b64encode(buffer).decode('utf-8')
+        _, buffer = cv2.imencode(".png", master_canvas)
+        img_str = base64.b64encode(buffer).decode("utf-8")
         data_url = f"data:image/png;base64,{img_str}"
-        
-        return jsonify({
-            "success": True, 
-            "fullStateImage": data_url,
-            "timestamp": time.time()
-        })
+
+        return jsonify(
+            {"success": True, "fullStateImage": data_url, "timestamp": time.time()}
+        )
 
 
 @app.route("/led_positions")
@@ -129,111 +131,11 @@ def add_led():
     except Exception as e:
         return jsonify({"error": f"Failed to add LED: {str(e)}"}), 500
 
-@app.route("/enqueue_delta", methods=["POST"])
-def enqueue_delta():
-    """
-    Legacy endpoint for delta processing via HTTP
-    Now primarily used for clients that don't support WebSockets
-    """
-    if not calibration_data:
-        return jsonify({"error": "Calibration data not loaded"}), 400
-
-    if 'delta' not in request.files:
-        return jsonify({"error": "No delta part"}), 400
-
-    file = request.files['delta']
-
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if not (file and file.filename.rsplit('.', 1)[1].lower() == 'png'):
-        return jsonify({"error": "Invalid file type"}), 400
-
-    # Get client ID from session
-    client_id = session.get('client_id', str(uuid.uuid4()))
-
-    # Check for clear canvas command
-    clear_canvas = request.form.get('clear_canvas', 'false').lower() == 'true'
-    
-    # Make a copy of the file content since the original will be closed after this request ends
-    file_content = file.read()
-    file.seek(0)  # Reset file pointer for potential future use
-
-    # Create a BytesIO object to mimic a file object with the content
-    file_copy = BytesIO(file_content)
-    file_copy.filename = file.filename
-    file_copy.content_type = file.content_type
-
-    try:
-        # Add to processing queue with a small timeout to prevent blocking
-        if clear_canvas:
-            # Special flag for clearing the canvas
-            deltaMessageQueue.put((client_id, file_copy, "clear"), timeout=1.0)
-            logger.info(f"Enqueued canvas clear from client {client_id} via HTTP")
-        else:
-            deltaMessageQueue.put((client_id, file_copy, "delta"), timeout=1.0)
-            queue_size = deltaMessageQueue.qsize()
-            logger.info(f"Enqueued delta from client {client_id} via HTTP, queue size: {queue_size}")
-
-        return jsonify({
-            "success": True,
-            "message": "Delta queued for processing",
-            "queue_position": deltaMessageQueue.qsize()
-        })
-    except queue.Full:
-        logger.warning(f"Queue full, rejecting delta from client {client_id}")
-        return jsonify({"error": "Server busy, please try again later"}), 503
-
-
-@app.route("/enqueue", methods=["POST"])
-def enqueue():
-    """Legacy endpoint for full canvas updates - redirects to delta processing"""
-    if not calibration_data:
-        return jsonify({"error": "Calibration data not loaded"}), 400
-
-    if 'canvas' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-
-    file = request.files['canvas']
-
-    if file.filename == '':
-        return jsonify({"error": "No selected file"}), 400
-
-    if not (file and file.filename.rsplit('.', 1)[1].lower() == 'png'):
-        return jsonify({"error": "Invalid file type"}), 400
-
-    # Get client ID from session
-    client_id = session.get('client_id', str(uuid.uuid4()))
-
-    # Make a copy of the file content since the original will be closed after this request ends
-    file_content = file.read()
-    file.seek(0)  # Reset file pointer for potential future use
-
-    # Create a BytesIO object to mimic a file object with the content
-    file_copy = BytesIO(file_content)
-    file_copy.filename = file.filename
-    file_copy.content_type = file.content_type
-
-    try:
-        # Add to processing queue with a small timeout to prevent blocking
-        deltaMessageQueue.put((client_id, file_copy, "full"), timeout=1.0)
-        queue_size = deltaMessageQueue.qsize()
-        logger.info(f"Enqueued full update from client {client_id}, queue size: {queue_size}")
-
-        return jsonify({
-            "success": True,
-            "message": "Update queued for processing",
-            "queue_position": queue_size
-        })
-    except queue.Full:
-        logger.warning(f"Queue full, rejecting update from client {client_id}")
-        return jsonify({"error": "Server busy, please try again later"}), 503
-
 
 def process_delta(client_id, file):
     """Process a pixel delta image and broadcast it to other clients"""
     global master_canvas
-    
+
     try:
         # Read the delta image
         file_bytes = np.frombuffer(file.read(), np.uint8)
@@ -245,25 +147,30 @@ def process_delta(client_id, file):
 
         # Initialize or update the master canvas
         with master_canvas_lock:
-            if master_canvas is None or master_canvas.shape[:2] != delta_image.shape[:2]:
+            if (
+                master_canvas is None
+                or master_canvas.shape[:2] != delta_image.shape[:2]
+            ):
                 # Initialize with black background if not exists or size changed
                 master_canvas = np.zeros(delta_image.shape, dtype=np.uint8)
-            
+
             # Apply the delta to the master canvas (overlay the changes)
             # Only copy non-black pixels from delta to master
-            non_black_mask = np.any(delta_image > 10, axis=2)  # Threshold to consider as drawn
+            non_black_mask = np.any(
+                delta_image > 10, axis=2
+            )  # Threshold to consider as drawn
             master_canvas[non_black_mask] = delta_image[non_black_mask]
-            
+
             # Make a copy of the current master canvas state
             current_state = master_canvas.copy()
-        
+
         # Convert both the delta and the full state to data URLs
-        _, delta_buffer = cv2.imencode('.png', delta_image)
-        delta_str = base64.b64encode(delta_buffer).decode('utf-8')
+        _, delta_buffer = cv2.imencode(".png", delta_image)
+        delta_str = base64.b64encode(delta_buffer).decode("utf-8")
         delta_url = f"data:image/png;base64,{delta_str}"
-        
-        _, full_buffer = cv2.imencode('.png', current_state)
-        full_str = base64.b64encode(full_buffer).decode('utf-8')
+
+        _, full_buffer = cv2.imencode(".png", current_state)
+        full_str = base64.b64encode(full_buffer).decode("utf-8")
         full_url = f"data:image/png;base64,{full_str}"
 
         # Return data to be emitted via WebSocket
@@ -272,12 +179,13 @@ def process_delta(client_id, file):
             "deltaImage": delta_url,
             "fullStateImage": full_url,
             "client_id": client_id,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         }
 
     except Exception as e:
         logger.error(f"Failed to process delta image: {str(e)}")
         return None
+
 
 def render(client_id, file, update_type="full"):
     """Process either a full canvas update or a delta update"""
@@ -291,18 +199,18 @@ def render(client_id, file, update_type="full"):
             if master_canvas is not None:
                 # Create an empty canvas of the same size
                 master_canvas = np.zeros(master_canvas.shape, dtype=np.uint8)
-                
+
                 # Convert the empty canvas to a data URL
-                _, buffer = cv2.imencode('.png', master_canvas)
-                img_str = base64.b64encode(buffer).decode('utf-8')
+                _, buffer = cv2.imencode(".png", master_canvas)
+                img_str = base64.b64encode(buffer).decode("utf-8")
                 data_url = f"data:image/png;base64,{img_str}"
-                
+
                 return {
                     "success": True,
                     "clear": True,
                     "fullStateImage": data_url,
                     "client_id": client_id,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 }
             else:
                 logger.warning("Attempted to clear non-existent master canvas")
@@ -327,7 +235,10 @@ def render(client_id, file, update_type="full"):
         # Sample colors for each LED position
         led_colors = {}
 
-        for led_index, (norm_x, norm_y) in calibration_data.normalized_positions.items():
+        for led_index, (
+            norm_x,
+            norm_y,
+        ) in calibration_data.normalized_positions.items():
             # Convert normalized coordinates to pixel coordinates
             pixel_x = int(norm_x * width)
             pixel_y = int(norm_y * height)
@@ -346,7 +257,7 @@ def render(client_id, file, update_type="full"):
             led_colors[led_index] = {
                 "color": hex_color,
                 "rgb": rgb_color,
-                "position": {"x": norm_x, "y": norm_y}
+                "position": {"x": norm_x, "y": norm_y},
             }
 
         # Return data to be emitted via WebSocket
@@ -354,12 +265,13 @@ def render(client_id, file, update_type="full"):
             "success": True,
             "led_colors": led_colors,
             "total_leds": len(led_colors),
-            "client_id": client_id
+            "client_id": client_id,
         }
 
     except Exception as e:
         logger.error(f"Failed to process image: {str(e)}")
         return None
+
 
 def process_updates_worker():
     """
@@ -383,10 +295,14 @@ def process_updates_worker():
 
                     # Emit update to all clients if processing was successful
                     if result:
-                        socketio.emit('update', result)
-                        logger.info(f"Processed and emitted {update_type} update from client {client_id}")
+                        socketio.emit("update", result)
+                        logger.info(
+                            f"Processed and emitted {update_type} update from client {client_id}"
+                        )
                     else:
-                        logger.warning(f"Failed to process {update_type} update from client {client_id}")
+                        logger.warning(
+                            f"Failed to process {update_type} update from client {client_id}"
+                        )
                 except Exception as e:
                     logger.error(f"Error processing update: {str(e)}")
                 finally:
@@ -399,6 +315,7 @@ def process_updates_worker():
                 logger.error(f"Unexpected error in worker thread: {str(e)}")
                 time.sleep(1)  # Prevent CPU spinning if there's a persistent error
 
+
 def start_worker_thread():
     """Start the worker thread for processing updates"""
     global worker_thread, shutdown_flag
@@ -406,9 +323,12 @@ def start_worker_thread():
     if worker_thread is None or not worker_thread.is_alive():
         shutdown_flag = threading.Event()
         worker_thread = threading.Thread(target=process_updates_worker)
-        worker_thread.daemon = True  # Allow the thread to be terminated when the main process exits
+        worker_thread.daemon = (
+            True  # Allow the thread to be terminated when the main process exits
+        )
         worker_thread.start()
         logger.info("Started update processing worker thread")
+
 
 def stop_worker_thread():
     """Stop the worker thread gracefully"""
@@ -420,11 +340,12 @@ def stop_worker_thread():
         worker_thread.join(timeout=5)
         logger.info("Worker thread stopped")
 
+
 def create_app() -> Flask:
     """Create and configure the Flask application."""
     global calibration_data, master_canvas
     calibration_data = LEDCalibrationData("led_calibration.json")
-    
+
     # Initialize an empty master canvas
     master_canvas = None
 
@@ -440,107 +361,114 @@ def create_app() -> Flask:
 
 
 # Socket.IO event handlers
-@socketio.on('connect')
+@socketio.on("connect")
 def handle_connect():
-    logger.info(f'Client connected: {request.sid}')
-    
+    logger.info(f"Client connected: {request.sid}")
+
     # When a client connects, send them the current full canvas state
     global master_canvas
     with master_canvas_lock:
         if master_canvas is not None:
             # Convert the master canvas to a data URL
-            _, buffer = cv2.imencode('.png', master_canvas)
-            img_str = base64.b64encode(buffer).decode('utf-8')
+            _, buffer = cv2.imencode(".png", master_canvas)
+            img_str = base64.b64encode(buffer).decode("utf-8")
             data_url = f"data:image/png;base64,{img_str}"
-            
-            # Send the initial state to just this client
-            emit('init_canvas', {
-                "success": True,
-                "fullStateImage": data_url,
-                "timestamp": time.time()
-            })
 
-@socketio.on('disconnect')
+            # Send the initial state to just this client
+            emit(
+                "init_canvas",
+                {"success": True, "fullStateImage": data_url, "timestamp": time.time()},
+            )
+
+
+@socketio.on("disconnect")
 def handle_disconnect():
-    logger.info(f'Client disconnected: {request.sid}')
+    logger.info(f"Client disconnected: {request.sid}")
+
 
 # Event when client sends an update via WebSocket
-@socketio.on('client_delta')
+@socketio.on("client_delta")
 def handle_client_delta(data):
-    client_id = data.get('client_id')
-    delta_image_base64 = data.get('delta_image')
-    timestamp = data.get('timestamp', time.time())
-    width = data.get('width', 800)
-    height = data.get('height', 600)
-    
-    logger.info(f'Received delta from client {client_id} via WebSocket')
-    
+    client_id = data.get("client_id")
+    delta_image_base64 = data.get("delta_image")
+    timestamp = data.get("timestamp", time.time())
+
+    logger.info(f"Received delta from client {client_id} via WebSocket")
+
     if not delta_image_base64:
-        logger.error(f'No delta image data in WebSocket message from client {client_id}')
+        logger.error(
+            f"No delta image data in WebSocket message from client {client_id}"
+        )
         return
-    
+
     try:
         # Decode the base64 image
         img_bytes = base64.b64decode(delta_image_base64)
         np_arr = np.frombuffer(img_bytes, np.uint8)
         delta_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        
+
         if delta_image is None:
-            logger.error(f'Failed to decode delta image from client {client_id}')
+            logger.error(f"Failed to decode delta image from client {client_id}")
             return
-            
+
         # Process the delta and update the master canvas
         global master_canvas
         with master_canvas_lock:
-            if master_canvas is None or master_canvas.shape[:2] != delta_image.shape[:2]:
+            if (
+                master_canvas is None
+                or master_canvas.shape[:2] != delta_image.shape[:2]
+            ):
                 # Initialize with black background if not exists or size changed
                 master_canvas = np.zeros(delta_image.shape, dtype=np.uint8)
-            
+
             # Apply the delta to the master canvas (overlay the changes)
             # Only copy non-black pixels from delta to master
-            non_black_mask = np.any(delta_image > 10, axis=2)  # Threshold to consider as drawn
+            non_black_mask = np.any(
+                delta_image > 10, axis=2
+            )  # Threshold to consider as drawn
             master_canvas[non_black_mask] = delta_image[non_black_mask]
-            
+
             # Make a copy of the current master canvas state
             current_state = master_canvas.copy()
-        
-        # Convert both the delta and the full state to data URLs
-        _, delta_buffer = cv2.imencode('.png', delta_image)
-        delta_str = base64.b64encode(delta_buffer).decode('utf-8')
-        delta_url = f"data:image/png;base64,{delta_str}"
-        
-        _, full_buffer = cv2.imencode('.png', current_state)
-        full_str = base64.b64encode(full_buffer).decode('utf-8')
-        full_url = f"data:image/png;base64,{full_str}"
-        
-        # Emit the update to all clients
-        emit('update', {
-            "success": True,
-            "deltaImage": delta_url,
-            "fullStateImage": full_url,
-            "client_id": client_id,
-            "timestamp": timestamp
-        }, broadcast=True)
-        
-        # Send confirmation back to the sender
-        emit('delta_received', {
-            "success": True,
-            "timestamp": time.time()
-        })
-        
-    except Exception as e:
-        logger.error(f'Error processing WebSocket delta: {str(e)}')
-        emit('delta_received', {
-            "success": False,
-            "error": str(e),
-            "timestamp": time.time()
-        })
 
-@socketio.on('clear_canvas')
+        # Convert both the delta and the full state to data URLs
+        _, delta_buffer = cv2.imencode(".png", delta_image)
+        delta_str = base64.b64encode(delta_buffer).decode("utf-8")
+        delta_url = f"data:image/png;base64,{delta_str}"
+
+        _, full_buffer = cv2.imencode(".png", current_state)
+        full_str = base64.b64encode(full_buffer).decode("utf-8")
+        full_url = f"data:image/png;base64,{full_str}"
+
+        # Emit the update to all clients
+        emit(
+            "update",
+            {
+                "success": True,
+                "deltaImage": delta_url,
+                "fullStateImage": full_url,
+                "client_id": client_id,
+                "timestamp": timestamp,
+            },
+            broadcast=True,
+        )
+
+        # Send confirmation back to the sender
+        emit("delta_received", {"success": True, "timestamp": time.time()})
+
+    except Exception as e:
+        logger.error(f"Error processing WebSocket delta: {str(e)}")
+        emit(
+            "delta_received",
+            {"success": False, "error": str(e), "timestamp": time.time()},
+        )
+
+
+@socketio.on("clear_canvas")
 def handle_clear_canvas(data):
-    client_id = data.get('client_id')
-    logger.info(f'Received clear canvas command from client {client_id}')
-    
+    client_id = data.get("client_id")
+    logger.info(f"Received clear canvas command from client {client_id}")
+
     try:
         # Clear the master canvas
         global master_canvas
@@ -548,47 +476,44 @@ def handle_clear_canvas(data):
             if master_canvas is not None:
                 # Create an empty canvas of the same size
                 master_canvas = np.zeros(master_canvas.shape, dtype=np.uint8)
-                
+
                 # Convert the empty canvas to a data URL
-                _, buffer = cv2.imencode('.png', master_canvas)
-                img_str = base64.b64encode(buffer).decode('utf-8')
+                _, buffer = cv2.imencode(".png", master_canvas)
+                img_str = base64.b64encode(buffer).decode("utf-8")
                 data_url = f"data:image/png;base64,{img_str}"
-                
+
                 # Broadcast clear to all clients
-                emit('update', {
-                    "success": True,
-                    "clear": True,
-                    "fullStateImage": data_url,
-                    "client_id": client_id,
-                    "timestamp": time.time()
-                }, broadcast=True)
-                
+                emit(
+                    "update",
+                    {
+                        "success": True,
+                        "clear": True,
+                        "fullStateImage": data_url,
+                        "client_id": client_id,
+                        "timestamp": time.time(),
+                    },
+                    broadcast=True,
+                )
+
                 # Send confirmation back to the sender
-                emit('clear_received', {
-                    "success": True,
-                    "timestamp": time.time()
-                })
+                emit("clear_received", {"success": True, "timestamp": time.time()})
             else:
                 logger.warning("Attempted to clear non-existent master canvas")
-                emit('clear_received', {
-                    "success": False,
-                    "error": "No canvas exists to clear",
-                    "timestamp": time.time()
-                })
+                emit(
+                    "clear_received",
+                    {
+                        "success": False,
+                        "error": "No canvas exists to clear",
+                        "timestamp": time.time(),
+                    },
+                )
     except Exception as e:
-        logger.error(f'Error processing clear canvas command: {str(e)}')
-        emit('clear_received', {
-            "success": False,
-            "error": str(e),
-            "timestamp": time.time()
-        })
+        logger.error(f"Error processing clear canvas command: {str(e)}")
+        emit(
+            "clear_received",
+            {"success": False, "error": str(e), "timestamp": time.time()},
+        )
 
-# Legacy event handler for backward compatibility
-@socketio.on('client_post')
-def handle_client_post(data):
-    logger.info(f'Received from {request.sid}: {data}')
-    # Broadcast to all clients except sender
-    emit('update', data, include_self=False)
 
 def main(
     calibration_file: str = "led_calibration.json",

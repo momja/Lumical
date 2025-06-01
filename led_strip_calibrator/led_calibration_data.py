@@ -21,15 +21,15 @@ class LEDCalibrationData:
         with open(calibration_file, "r") as f:
             # Load the JSON data
             data = json.load(f)
-            
+
             # Get dimensions from JSON
             self.image_height = data.get("height", 0)
             self.image_width = data.get("width", 0)
-            
+
             # Parse the embedded CSV data
             csv_data = data.get("coords", "")
             csv_reader = csv.DictReader(io.StringIO(csv_data))
-            
+
             for row in csv_reader:
                 if row.get("x") and row.get("y"):  # Skip empty rows
                     led_index = int(row["led_index"])
@@ -78,24 +78,26 @@ if __name__ == "__main__":
     # Example usage:
     #   python -m led_strip_calibrator.led_calibration_data
     #   python -m led_strip_calibrator.led_calibration_data path/to/custom_calibration.json
-    
+
     import sys
-    
+
     # Use the provided file or default to led_calibration.json
     calibration_file = sys.argv[1] if len(sys.argv) > 1 else "led_calibration.json"
-    
+
     # Create the calibration data object
     calibration = LEDCalibrationData(calibration_file)
-    
+
     # Print the loaded data
     print(f"\nLoaded {len(calibration.led_positions)} LED positions:")
     for led_index in sorted(calibration.led_positions.keys()):
         x, y = calibration.led_positions[led_index]
         print(f"LED {led_index}: ({x:.1f}, {y:.1f})")
-    
+
     print(f"\nImage dimensions: {calibration.image_width}x{calibration.image_height}")
-    
+
     print("\nNormalized positions:")
-    for led_index in sorted(calibration.normalized_positions.keys())[:5]:  # Show first 5 for brevity
+    for led_index in sorted(calibration.normalized_positions.keys())[
+        :5
+    ]:  # Show first 5 for brevity
         nx, ny = calibration.normalized_positions[led_index]
         print(f"LED {led_index}: ({nx:.3f}, {ny:.3f})")
