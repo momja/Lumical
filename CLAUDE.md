@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Install dependencies: `uv pip install -e ".[dev]"`
 - Run calibration: `uv run -m led_strip_calibrator process path/to/images`
 - Run with options: `uv run -m led_strip_calibrator process path/to/images --method threshold --threshold 180 --visualize`
-- Lint: `ruff check .`
-- Format: `ruff format .`
-- Type check: `mypy led_strip_calibrator`
-- Tests: `pytest`
-- Single test: `pytest tests/test_file.py::test_function`
+- Lint: `uv run ruff check .`
+- Format: `uv run ruff format .`
+- Type check: `uv run mypy led_strip_calibrator`
+- Tests: `uv run pytest`
+- Single test: `uv run pytest tests/test_file.py::test_function`
 
 Note: This project uses `uv run` to execute Python scripts within the virtual environment.
 
