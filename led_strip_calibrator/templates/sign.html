@@ -10,8 +10,8 @@
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <img src="{{ url_for('static', filename='turntable_logo.gif') }}"/>
+        <div class="header banner-container">
+            <img class="banner-image" src="{{ url_for('static', filename='turntable_logo.gif') }}"/>
             <p>Draw on the canvas to control your LED strip colors</p>
         </div>
 
@@ -56,6 +56,12 @@
                     <canvas id="drawingCanvas" width="800" height="600"></canvas>
                 </div>
             </div>
+        </div>
+
+        <div class="footer">
+            <p>
+                Made with <a><i class="ph-fill ph-heart-straight"></i></a> and <a><i class="ph-fill ph-coffee"></i></a>.
+            </p>
         </div>
 
     </div>
